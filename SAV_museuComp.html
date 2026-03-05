@@ -1,0 +1,2137 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Agendamento de Visita</title>
+
+  <style>
+
+    /* =========================================================================
+       VARIÁVEIS DE LAYOUT (offsets de posicionamento vertical)
+       -------------------------------------------------------------------------
+       Ajuste os valores abaixo para deslocar verticalmente seções específicas:
+         --offset-tipo-visitante : afeta SOMENTE o campo "Tipo de Visitante"
+         --offset-abaixo-tipo    : afeta TODOS os campos ABAIXO de "Tipo de Visitante" (em conjunto)
+         --offset-data-horario   : afeta o bloco "Data da Visita + Horário"
+
+       Exemplo rápido (aplicar diretamente no <body>):
+         <body style="--offset-tipo-visitante:-8px; --offset-abaixo-tipo:12px; --offset-data-horario:-6px;">
+    ========================================================================= */
+    :root {
+      --offset-tipo-visitante : 0px;
+      --offset-abaixo-tipo    : 50px;
+      --offset-data-horario   : 0px;
+    }
+
+    /* Seletores de deslocamento vertical por variável */
+    #grp-pessoa #campo-tipo-visitante      { margin-top: calc(var(--offset-tipo-visitante)); }
+    #grp-pessoa .grupo-abaixo-tipo         { margin-top: calc(var(--offset-abaixo-tipo)); }
+    #grp-visitacao #grupo-data-horario     { margin-top: calc(var(--offset-data-horario)); }
+
+    /* Utilitário de deslocamento via classe: aplique .moveY em qualquer bloco
+       e controle com a variável CSS --moveY no elemento pai ou inline */
+    .moveY {
+      transform   : translateY(var(--moveY, 0px));
+      will-change : transform;
+    }
+
+    /* =========================================================================
+       BASE
+    ========================================================================= */
+    body {
+      font-family      : Arial, sans-serif;
+      background-color : #f2f2f2;
+      padding          : 20px;
+    }
+
+    /* =========================================================================
+       LAYOUT PRINCIPAL
+    ========================================================================= */
+    .container-principal {
+      display    : flex;
+      flex-wrap  : wrap;
+      gap        : 20px;
+      align-items: stretch;
+    }
+
+    /* Coluna esquerda: calendário + mensagens de alerta */
+    #calendario-container {
+      position       : relative;
+      display        : flex;
+      flex-direction : column;
+      justify-content: flex-start;
+      flex           : 1;
+      min-width      : 350px;
+      max-width      : 380px;
+    }
+
+    /* Coluna direita: formulário de agendamento */
+    #form-wrapper {
+      flex      : 2;
+      min-width : 600px;
+    }
+
+    /* =========================================================================
+       HEADER
+    ========================================================================= */
+    .header-title {
+      display         : flex;
+      align-items     : center;
+      justify-content : space-between;
+      background      : #480303;
+      border-radius   : 8px;
+      padding         : 0 35px;
+      height          : 64px;
+      box-sizing      : border-box;
+      gap             : 10px;
+    }
+
+    .header-title .logo-icon {
+      height      : auto;
+      max-height  : 150px;
+      width       : auto;
+      max-width   : 150px;
+      display     : block;
+      object-fit  : contain;
+      flex-shrink : 0;
+    }
+
+    .header-title h2 {
+      color      : white;
+      margin     : 0;
+      font-size  : 1.25rem;
+      text-align : center;
+      flex-grow  : 1;
+    }
+
+    /* =========================================================================
+       FAIXA DE INFORMAÇÕES (horário de funcionamento)
+    ========================================================================= */
+    #infoFuncionamento {
+      color          : darkblue;
+      font-weight    : bold;
+      text-align     : center;
+      margin-top     : 10px;
+      margin-bottom  : 12px;
+      white-space    : nowrap;
+      overflow       : hidden;
+      text-overflow  : ellipsis;
+    }
+
+    /* =========================================================================
+       CONTROLES DO CALENDÁRIO (seletores de mês/ano)
+    ========================================================================= */
+    .select-group {
+      display       : flex;
+      align-items   : center;
+      gap           : 32px;
+      margin-bottom : 15px;
+    }
+
+    .select-with-arrows {
+      display     : flex;
+      align-items : center;
+      gap         : 7px;
+    }
+
+    .select-with-arrows button {
+      padding   : 4px 8px;
+      font-size : 14px;
+      cursor    : pointer;
+    }
+
+    #monthSelector { max-width: 100px; }
+    #yearSelector  { max-width: 80px;  }
+
+    /* =========================================================================
+       GRID DO CALENDÁRIO
+    ========================================================================= */
+    #calendar {
+      display               : grid;
+      grid-template-columns : repeat(7, 1fr);
+      gap                   : 3px;
+      width                 : 100%;
+      margin-bottom         : 8px;
+    }
+
+    /* Célula base do calendário */
+    .dia {
+      padding         : 6px;
+      background      : #eee;
+      text-align      : center;
+      border-radius   : 4px;
+      height          : 35px;
+      display         : flex;
+      align-items     : center;
+      justify-content : center;
+      font-size       : 13px;
+    }
+
+    /* Estados visuais dos dias */
+    .clicavel          { cursor: pointer; background: #e0f7fa; }
+    .selected          { background: green !important; color: white; }
+    .agendado-1        { background-color: #cce5ff !important; border: 2px solid #3399ff; }
+    .agendado-2        { background-color: #fff5cc !important; outline: 2px solid #ffcc00; outline-offset: -2px; }
+    .sem-vagas         { background-color: #e0f0ff !important; outline: 2px solid #386fa5; outline-offset: -2px;
+                         color: #003366 !important; cursor: pointer; }
+    .sem-vagas-tma     { background-color: #d3d3d3 !important; outline: 2px solid #386fa5; outline-offset: -2px;
+                         color: #5a5a5a !important; cursor: pointer; }
+    .nao-agendavel     { background-color: #f8d7da !important; color: #721c24 !important; cursor: pointer; }  /* fim de semana / bloqueado*/
+    .sem-antecedencia  { background-color: #d3d3d3 !important; color: #5a5a5a !important; cursor: pointer; }
+    .dia-passado-feriado {                                                                                     /* passado ou feriado       */
+      background : repeating-linear-gradient(45deg, #e0e0e0, #e0e0e0 5px, #d0d0d0 5px, #d0d0d0 10px) !important;
+      color      : #666 !important;
+      cursor     : pointer;
+    }
+
+    /* =========================================================================
+       MENSAGENS DE ALERTA / INFORMAÇÃO
+    ========================================================================= */
+    #mensagem {
+      color       : red;
+      font-weight : bold;
+      margin-top  : 8px;
+      margin-bottom: 4px;
+      max-width   : 380px;
+      word-wrap   : break-word;
+      min-height  : 20px;
+      font-size   : 14px;
+    }
+
+    /* Caixa de confirmação pós-envio ("Deseja agendar uma nova visita?") */
+    .mensagem-confirmacao {
+      position        : relative;
+      justify-content : center;
+      color           : red;
+      font-weight     : bold;
+      display         : flex;
+      align-items     : center;
+      gap             : 10px;
+      margin-top      : 6px;
+      margin-bottom   : 6px;
+      font-size       : 14px;
+      flex-wrap       : wrap;
+      min-height      : 20px;
+    }
+
+    .mensagem-confirmacao button {
+      padding       : 6px 12px;
+      font-size     : 14px;
+      cursor        : pointer;
+      border        : none;
+      border-radius : 4px;
+    }
+
+    /* Botões Sim / Não das caixas de confirmação */
+    .btn-sim { background-color: #28a745; color: white; }
+    .btn-nao { background-color: #dc3545; color: white; }
+
+    /* Área de resposta de envio (fica ao lado dos botões do formulário) */
+    #respostaVisitas {
+      display     : flex;
+      align-items : center;
+      gap         : 10px;
+      color       : green;
+      font-weight : bold;
+      flex-grow   : 1;
+    }
+    #respostaVisitas span   { white-space: nowrap; }
+    #respostaVisitas button { margin-left: 8px; padding: 6px 12px; font-size: 14px; cursor: pointer; }
+
+    /* Texto informativo sobre o Restaurante Universitário */
+    #texto-restaurante {
+      margin-top : 55px;
+      font-size  : 14px;
+      color      : black;
+      position   : flex;
+      z-index    : 1;
+    }
+
+    /* =========================================================================
+       FORMULÁRIO DE AGENDAMENTO
+    ========================================================================= */
+
+    /* Container externo do formulário (oculto até o usuário clicar em uma data) */
+    #formContainer {
+      margin-bottom    : 5px;
+      border           : 1px solid #ccc;
+      padding          : 20px;
+      border-radius    : 12px;
+      background-color : #d8eff3;
+      display          : none;
+    }
+
+    /* Layout em duas colunas dentro do form */
+    .form-layout {
+      display : flex;
+      gap     : 20px;
+    }
+
+    .form-coluna {
+      display        : flex;
+      flex-direction : column;
+      gap            : 10px;
+    }
+
+    .form-coluna.esquerda { flex: 1.2; }
+    .form-coluna.direita  { flex: 1;   }
+
+    /* Fieldsets internos (grupos de campos) */
+    fieldset {
+      border           : 1px solid #bce2e8;
+      border-radius    : 8px;
+      padding          : 15px;
+      margin           : 0;
+      background-color : #e9f8fb;
+      display          : flex;
+      flex-direction   : column;
+      gap              : 15px;
+      height           : 100%;
+    }
+
+    legend {
+      font-weight   : bold;
+      margin-bottom : 10px;
+      padding       : 0 5px;
+      font-size     : 1.1em;
+    }
+
+    label {
+      display        : flex;
+      flex-direction : column;
+      font-size      : 14px;
+      margin-bottom  : 5px;
+    }
+
+    /* Linha horizontal de campos */
+    .linha {
+      display     : flex;
+      gap         : 10px;
+      align-items : flex-start;
+    }
+
+    /* Campos individuais dentro de .linha */
+    .campo         { display: flex; flex-direction: column; flex: 1; }
+    .campo.nome    { flex: 2; }
+    .campo.tipo-inst { flex: 1; }
+    .campo.spacer  { flex-grow: 1; }
+
+    /* Inputs, selects e textareas */
+    input, select, textarea {
+      padding      : 8px;
+      font-size    : 14px;
+      border-radius: 6px;
+      border       : 1px solid #aaa;
+      width        : 100%;
+      box-sizing   : border-box;
+    }
+
+    /* Grupo de botões de ação (Limpar / Cancelar / Enviar) */
+    .button-group {
+      margin-top      : auto;
+      padding-top     : 15px;
+      display         : flex;
+      gap             : 10px;
+      justify-content : flex-end;
+      align-items     : center;
+    }
+
+    button              { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; }
+    #btnEnviar          { background: #007BFF; color: white; }
+    #btnLimpar          { background: #ffc107; color: black; }
+    #btnCancelar        { background: #dc3545; color: white; }
+
+    /* Campo de observações empurrado para a base do fieldset */
+    .campo label[for="observacoes"],
+    .campo#campo-observacoes { margin-top: auto; padding-top: 50px; }
+
+    .form-coluna.esquerda .linha:first-of-type { margin-top: 0; }
+
+    /* =========================================================================
+       EFEITO DE FOCO PISCANTE (blink-focus)
+       Usado para guiar o usuário ao próximo campo obrigatório
+    ========================================================================= */
+    @keyframes blink-pulse {
+      0%   { box-shadow: 0 0 0 0   rgba(0, 123, 255, 0.00); }
+      50%  { box-shadow: 0 0 0 8px rgba(0, 123, 255, 0.12); }
+      100% { box-shadow: 0 0 0 0   rgba(0, 123, 255, 0.00); }
+    }
+
+    .blink-focus {
+      animation       : blink-pulse 1.2s ease-in-out infinite;
+      border-radius   : 6px;
+      outline         : 2px solid rgba(0, 123, 255, 0.6);
+      outline-offset  : 2px;
+      transition      : transform 0.12s ease;
+      transform-origin: center;
+    }
+
+    /* Campo de texto livre para necessidades PcD (aparece quando "Outros" é selecionado) */
+    #necessidadesOutros {
+      position   : absolute;
+      min-height : 40px;
+      margin-top : 30px;
+      width      : 205px;
+      display    : none;
+    }
+
+  </style>
+</head>
+
+<body>
+
+  <!-- =========================================================================
+       HEADER: logos laterais + título central
+  ========================================================================= -->
+  <div class="header-title">
+    <img id="logo-esq" class="logo-icon" alt="Logo do Museu">
+    <h2>Agendamento de Visita</h2>
+    <img id="logo-dir" class="logo-icon" alt="Logo do Museu">
+  </div>
+
+  <!-- Faixa de horário de funcionamento (preenchida via JS com fetch do site do museu) -->
+  <div id="infoFuncionamento"><!-- preenchido via JS --></div>
+
+  <!-- =========================================================================
+       GRID PRINCIPAL: calendário (esquerda) + formulário (direita)
+  ========================================================================= -->
+  <div class="container-principal">
+
+    <!-- -----------------------------------------------------------------------
+         COLUNA ESQUERDA: calendário interativo, mensagens e links de apoio
+    ----------------------------------------------------------------------- -->
+    <div id="calendario-container">
+
+      <!-- Controles de navegação mês/ano -->
+      <div class="select-group">
+        <div class="select-with-arrows">
+          <button id="monthPrev" type="button">&#x25C0;</button>
+          <select id="monthSelector"></select>
+          <button id="monthNext" type="button">&#x25B6;</button>
+        </div>
+        <div class="select-with-arrows">
+          <button id="yearPrev" type="button">&#x25C0;</button>
+          <select id="yearSelector"></select>
+          <button id="yearNext" type="button">&#x25B6;</button>
+        </div>
+      </div>
+
+      <!-- Grid do calendário (preenchido via JS) -->
+      <div id="calendar">
+        <p style="text-align:center;color:#555;font-size:13px;">Carregando calendário...</p>
+      </div>
+
+      <!-- Área de mensagens de alerta/orientação abaixo do calendário -->
+      <div id="mensagem"></div>
+
+      <!-- Caixa de confirmação pós-envio: "Deseja agendar outra visita?" -->
+      <div id="mensagemConfirmacao" class="mensagem-confirmacao" style="display: none;">
+        <span id="textoConfirmacao">Solicitação enviada! Deseja agendar uma nova visita?</span>
+        <button class="btn-sim" type="button" onclick="agendarOutraVisita()">Sim</button>
+        <button class="btn-nao" type="button" onclick="naoAgendarOutra()">Não</button>
+      </div>
+
+      <!-- Link para baixar o documento do Restaurante Universitário -->
+      <p id="texto-restaurante">
+        Grupos que desejarem usar o restaurante universitário da USP devem enviar o
+        <a href="https://drive.google.com/uc?export=download&id=1Lovq0JKYRXKolp7an4O9d7l5fDmR6Gso"
+           download="RelacaoVisitantes_RU.docx">arquivo</a>
+        preenchido o quanto antes para:
+        <a href="/cdn-cgi/l/email-protection"
+           class="__cf_email__"
+           data-cfemail="0d60787e68784d646e606e23787e7d236f7f">[email&#160;protected]</a>.
+      </p>
+
+      <!-- Contato via WhatsApp do Museu -->
+      <p id="texto-contato" style="font-size:14px;color:black;">
+        Em caso de dúvidas, contate-nos pelo
+        <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg"
+             alt="WhatsApp" style="width:20px;vertical-align:middle;">
+        <a href="https://wa.me/5516337397754" target="_blank"
+           style="color:darkblue;text-decoration:none;">16 3373-9754</a>.
+      </p>
+    </div><!-- /calendario-container -->
+
+    <!-- -----------------------------------------------------------------------
+         COLUNA DIREITA: formulário de agendamento
+         (exibido apenas após o usuário selecionar uma data válida no calendário)
+    ----------------------------------------------------------------------- -->
+    <div id="form-wrapper">
+      <div id="formContainer">
+        <form id="bookingForm">
+          <fieldset id="form-fieldset">
+
+            <!-- Data de Agendamento (preenchida automaticamente com a data de hoje, somente leitura) -->
+            <div style="display:flex;justify-content:flex-end;margin-bottom:2px;align-items:center;gap:10px;">
+              <label for="dataAgendamento" style="font-weight:bold;">Data de Agendamento:</label>
+              <input id="dataAgendamento" type="date" readonly tabindex="-1"
+                     style="width:120px;font-size:.85rem;padding:2px 4px;">
+            </div>
+
+            <div class="form-layout">
+
+              <!-- ==============================================================
+                   COLUNA ESQUERDA DO FORM: Dados da Pessoa / Instituição
+              ============================================================== -->
+              <div class="form-coluna esquerda">
+                <fieldset id="grp-pessoa">
+                  <legend>Dados da Pessoa/Instituição</legend>
+
+                  <!-- Tipo de Visitante: controla obrigatoriedade dos campos institucionais -->
+                  <div id="campo-tipo-visitante" class="campo" style="margin-top:-15px;">
+                    <label>* Tipo de Visitante:</label>
+                    <select id="tipo" required>
+                      <option value="" disabled selected hidden>Selecione</option>
+                      <option value="P.Física">P.Física</option>
+                      <option value="Institucional">Institucional</option>
+                      <option value="Outros">Outros</option>
+                    </select>
+                  </div>
+
+                  <!-- Nome da Instituição/Pessoa e Tipo de Instituição -->
+                  <div class="grupo-abaixo-tipo-1">
+                    <div class="linha">
+                      <div class="campo nome" style="margin-top:-70px;">
+                        <label>* Nome da Instituição/Pessoa Física:</label>
+                        <input id="nome" required>
+                      </div>
+                      <div class="campo tipo-inst" style="margin-top:-70px;">
+                        <label>* Tipo de Instituição:</label>
+                        <select id="tipoInstituicao">
+                          <option value="" disabled selected hidden>Selecione</option>
+                          <option value="Pública">Pública</option>
+                          <option value="Privada">Privada</option>
+                          <option value="ONG">ONG</option>
+                          <option value="Outros">Outros</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- CEP, Endereço e Número (busca automática via ViaCEP) -->
+                  <div class="grupo-abaixo-tipo-2">
+                    <div class="linha">
+                      <div class="campo" style="flex:0.6;">
+                        <label>* CEP:</label>
+                        <input id="cep" placeholder="só números" maxlength="9">
+                      </div>
+                      <div class="campo" style="flex:1.8;">
+                        <label>* Endereço:</label>
+                        <input id="endereco" placeholder="preencher se vazio" required>
+                      </div>
+                      <div class="campo" style="flex:0.4;">
+                        <label>* Número:</label>
+                        <input id="numero" placeholder="Nº">
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Bairro, Cidade, UF e País -->
+                  <div class="grupo-abaixo-tipo-3">
+                    <div class="linha">
+                      <div class="campo" style="flex:1.2;">
+                        <label>* Bairro:</label>
+                        <input id="bairro" placeholder="preencher se vazio" required>
+                      </div>
+                      <div class="campo" style="flex:1.7;">
+                        <label>* Cidade:</label>
+                        <input id="cidade" required>
+                      </div>
+                      <div class="campo" style="flex:0.4;">
+                        <label>* UF:</label>
+                        <input id="uf" maxlength="2" placeholder="SP" required>
+                      </div>
+                      <div class="campo pais" style="flex:0.4;">
+                        <label>* País:</label>
+                        <input id="pais" maxlength="3" value="BR" placeholder="BR" required>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Nome e Ocupação do Responsável -->
+                  <div class="grupo-abaixo-tipo-4">
+                    <div class="linha">
+                      <div class="campo">
+                        <label>* Nome do Responsável:</label>
+                        <input id="nomeCompleto" required>
+                      </div>
+                      <div class="campo">
+                        <label>* Ocupação do Responsável:</label>
+                        <input id="ocupacao" required>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- E-mail e Telefone do Responsável -->
+                  <div class="grupo-abaixo-tipo-5">
+                    <div class="linha">
+                      <div class="campo" style="flex:1.2;">
+                        <label for="email">* E-mail do Responsável:</label>
+                        <input id="email" type="email" inputmode="email" autocomplete="email" spellcheck="false"
+                               placeholder="seuemail@dominio.com" required
+                               pattern="^[^\s@]+@[^\s@]+\.[^\s@]{2,}$"
+                               title="Informe um e-mail válido, ex.: nome@dominio.com">
+                      </div>
+                      <div class="campo" style="flex:1.2;">
+                        <label>* Telefone do Responsável:</label>
+                        <input id="telefone" placeholder="só números" required>
+                      </div>
+                    </div>
+                  </div>
+                </fieldset>
+              </div><!-- /form-coluna esquerda -->
+
+              <!-- ==============================================================
+                   COLUNA DIREITA DO FORM: Dados da Visitação
+              ============================================================== -->
+              <div class="form-coluna direita">
+                <fieldset id="grp-visitacao">
+                  <legend>Dados da Visitação</legend>
+
+                  <!-- Data da Visita (somente leitura, preenchida pelo calendário) e Horário -->
+                  <div id="grupo-data-horario" class="linha">
+                    <div class="campo" style="margin-top:-15px;">
+                      <label>Data da Visita:</label>
+                      <input id="dataVisita" type="date" readonly required tabindex="-1">
+                    </div>
+                    <div class="campo" style="margin-top:-15px;">
+                      <label>* Horário:</label>
+                      <select id="horario" required></select>
+                    </div>
+                  </div>
+
+                  <!-- Quantidade de visitantes e responsáveis -->
+                  <div class="linha">
+                    <div class="campo">
+                      <label>* N° de Visitantes:</label>
+                      <input id="numeroAlunos" type="number" min="1" max="40" required>
+                    </div>
+                    <div class="campo">
+                      <label>* N° de Prof./Responsáveis:</label>
+                      <input id="numeroResponsaveis" type="number" min="1" required>
+                    </div>
+                  </div>
+
+                  <!-- Tipo de público -->
+                  <div class="campo">
+                    <label>* Tipo de Público:</label>
+                    <select id="tipoPublico" required>
+                      <option value="" disabled selected hidden>Selecione</option>
+                      <option value="Infantil">Infantil</option>
+                      <option value="Fundamental">Fundamental</option>
+                      <option value="Médio">Médio</option>
+                      <option value="Superior">Superior</option>
+                      <option value="Familiar">Familiar</option>
+                      <option value="Outros">Outros</option>
+                    </select>
+                  </div>
+
+                  <!-- Pessoas com Deficiência (PcD): quantidade e necessidades -->
+                  <div class="linha">
+                    <div class="campo">
+                      <label>* N° de Pessoas com Deficiência:</label>
+                      <input id="qtdDef" type="number" min="0" value="0" required>
+                    </div>
+                    <div class="campo">
+                      <label>* Necessidade para PcD:</label>
+                      <select id="necessidades" disabled>
+                        <option value="" disabled selected hidden>Selecione</option>
+                        <option value="Cadeira de rodas">Cadeira de rodas</option>
+                        <option value="Audiodescricao">Audiodescrição</option>
+                        <option value="Outros">Outros</option>
+                      </select>
+                      <!-- Campo de texto exibido apenas quando "Outros" é selecionado em #necessidades -->
+                      <input id="necessidadesOutros" type="text"
+                             placeholder="Descreva a necessidade"
+                             style="margin-top:5px;display:none;">
+                    </div>
+                  </div>
+
+                  <!-- Observações livres -->
+                  <div class="campo" id="campo-observacoes" style="margin-top:-20px;">
+                    <label>Observações/Informações Adicionais:</label>
+                    <textarea id="observacoes" rows="3"
+                              placeholder="Ex: Interesse em fazer doação, temas específicos de interesse, etc."></textarea>
+                  </div>
+
+                  <!-- Botões de ação do formulário -->
+                  <div class="button-group">
+                    <div id="respostaVisitas"></div>
+                    <button type="button" style="margin-top:-16px;" id="btnLimpar">Limpar</button>
+                    <button type="button" style="margin-top:-16px;" id="btnCancelar">Cancelar</button>
+                    <button type="submit"  style="margin-top:-16px;" id="btnEnviar">Enviar</button>
+                  </div>
+
+                </fieldset>
+              </div><!-- /form-coluna direita -->
+
+            </div><!-- /form-layout -->
+          </fieldset>
+        </form>
+      </div><!-- /formContainer -->
+    </div><!-- /form-wrapper -->
+
+  </div><!-- /container-principal -->
+
+
+  <!-- =========================================================================
+       SCRIPT PRINCIPAL
+       Cloudflare: decodificador de e-mails ofuscados (não remover)
+  ========================================================================= -->
+  <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script>
+  <script>
+    /* =========================================================================
+       UTILITÁRIOS GERAIS
+    ========================================================================= */
+
+    /**
+     * Atalho para document.getElementById.
+     * @param  {string} id  - ID do elemento HTML.
+     * @returns {HTMLElement}
+     */
+    const $ = (id) => document.getElementById(id);
+
+    /* =========================================================================
+       VALIDAÇÃO DE E-MAIL
+    ========================================================================= */
+
+    /**
+     * Remove espaços e converte para minúsculas.
+     * @param  {string} v - Valor bruto do campo e-mail.
+     * @returns {string}
+     */
+    function sanitizeEmail(v) {
+      return (v || '').replace(/\s+/g, '').toLowerCase();
+    }
+
+    /**
+     * TLDs reconhecidos (conservador): usados como critério extra de validação.
+     * Aceita TLDs simples, compostos (.com.br) e genéricos de 2–8 letras.
+     */
+    const COMMON_TLDS = new Set([
+      'com', 'org', 'net', 'edu', 'gov', 'mil', 'info', 'io', 'ai', 'dev', 'app',
+      'br', 'com.br', 'org.br', 'net.br', 'edu.br', 'gov.br',
+      'adm.br', 'eng.br', 'eco.br'
+    ]);
+
+    /**
+     * Verifica se o domínio parece válido (sem acesso à rede).
+     * Regras: pelo menos um ponto, só caracteres alfanuméricos/hífen,
+     * sem hífens nas extremidades, sem pontos duplos, TLD reconhecido ou genérico.
+     * @param  {string} domain
+     * @returns {boolean}
+     */
+    function looksLikeValidDomain(domain) {
+      const parts = domain.toLowerCase().split('.');
+      if (parts.length < 2)                                      return false;
+      if (parts.some(p => !/^[a-z0-9-]{1,63}$/.test(p)))       return false;
+      if (parts.some(p => p.startsWith('-') || p.endsWith('-'))) return false;
+      if (/\.\./.test(domain))                                   return false;
+
+      const simpleTld = parts[parts.length - 1];
+      const doubleTld = parts.slice(-2).join('.');
+
+      if (COMMON_TLDS.has(doubleTld) || COMMON_TLDS.has(simpleTld)) return true;
+      return /^[a-z]{2,8}$/.test(simpleTld);
+    }
+
+    /**
+     * Validação estrita de e-mail (RFC 5322 simplificada).
+     * Combina checagem de formato, local-part e domínio.
+     * @param  {string} v - Valor do campo e-mail (bruto).
+     * @returns {boolean}
+     */
+    function isValidEmailStrict(v) {
+      v = sanitizeEmail(v);
+      const m = v.match(/^([^@]{1,64})@([^@]{1,255})$/i);
+      if (!m) return false;
+      const local = m[1], domain = m[2];
+      if (!/^[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+$/i.test(local)) return false;
+      if (!looksLikeValidDomain(domain))                     return false;
+      return true;
+    }
+
+    /* =========================================================================
+       CONFIGURAÇÃO DA API (Google Apps Script)
+    ========================================================================= */
+
+    /** URL do Web App implantado no Google Apps Script (POST/GET de agendamentos). */
+    const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzacRkZU6VHuyjorNFLhMVdbCT6dJF5bXXZkOYCgm0NSvXoO3_slpz3XmMcB6QaxNfF/exec';
+
+    /**
+     * Coleta todos os valores do formulário em um único objeto.
+     * @returns {Object} Payload pronto para serialização JSON e envio.
+     */
+    function collectFormData() {
+      const v = (id) => (document.getElementById(id)?.value ?? '').trim();
+      const necessidades       = v('necessidades');
+      const necessidadesOutros = v('necessidadesOutros').trim();
+
+      return {
+        // Localização / contato
+        cep: v('cep'), endereco: v('endereco'), numero: v('numero'),
+        bairro: v('bairro'), cidade: v('cidade'), uf: v('uf'), pais: v('pais'),
+        email: v('email'), telefone: v('telefone'),
+
+        // Instituição / visitante
+        tipo: v('tipo'), nome: v('nome'), tipoInstituicao: v('tipoInstituicao'),
+        nomeCompleto: v('nomeCompleto'), ocupacao: v('ocupacao'),
+        tipoPublico: v('tipoPublico'),
+
+        // Visita
+        dataAgendamento    : v('dataAgendamento'),   // data em que a solicitação foi feita
+        dataVisita         : v('dataVisita'),         // data pretendida da visita
+        horario            : v('horario'),
+        numeroAlunos       : v('numeroAlunos'),
+        numeroResponsaveis : v('numeroResponsaveis'),
+        qtdDef             : v('qtdDef'),
+        necessidades,
+        necessidadesOutros,
+        observacoes        : v('observacoes')
+      };
+    }
+
+    /**
+     * Envia o payload ao Apps Script via FormData (evita preflight CORS).
+     * Estratégia de fallback:
+     *   1. Tenta com modo CORS padrão (permite ler a resposta JSON).
+     *   2. Se falhar (bloqueio CORS), tenta com mode:'no-cors' (resposta opaca).
+     * @param  {Object} payload - Dados coletados por collectFormData().
+     * @returns {Promise<{ok:boolean, opaque?:boolean}>}
+     */
+    async function enviarParaPlanilhaEEEmail(payload) {
+      const fd = new FormData();
+      fd.append('payload', JSON.stringify(payload));
+
+      // Tentativa 1: CORS padrão (permite leitura da resposta JSON)
+      try {
+        const resp = await fetch(WEB_APP_URL, { method: 'POST', body: fd });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || 'Falha ao salvar.');
+        return data;
+      } catch (_) {
+        // Tentativa 2: no-cors (resposta opaca — sem como confirmar sucesso/falha do servidor)
+        try {
+          await fetch(WEB_APP_URL, { method: 'POST', body: fd, mode: 'no-cors' });
+          return { ok: true, opaque: true };
+        } catch (err) {
+          throw err; // Erro real de rede; propaga para o chamador
+        }
+      }
+    }
+
+    /* =========================================================================
+       ESTADO GLOBAL DA APLICAÇÃO
+    ========================================================================= */
+
+    let diaAtivo             = null;   // número do dia atualmente selecionado no calendário
+    let ultimoDiaClicado     = null;   // chave "YYYY-M-D" para detectar duplo clique
+    let focusHorarioOnNextOpen = false; // se true, próxima abertura do form foca o campo #horario
+    let mensagemInicialExibida = false; // controla exibição única da mensagem de boas-vindas
+
+    /**
+     * Conjunto de combinações data|hora já agendadas (carregadas da planilha).
+     * Formato de cada entrada: "YYYY-MM-DD|HH:MM"
+     */
+    const agendamentos = new Set();
+
+    /**
+     * Conjunto de datas que já possuem ao menos uma solicitação registrada.
+     * Usado para pintar o calendário de amarelo (.agendado-2).
+     */
+    const diasSolicitados = new Set();
+
+    /**
+     * Armazena o último agendamento submetido com sucesso.
+     * Usado para marcar a data em amarelo após o usuário confirmar "Não" ou "Sim".
+     * @type {{ data: string, hora: string } | null}
+     */
+    let ultimoAgendamento = null;
+
+    /* =========================================================================
+       COMUNICAÇÃO COM A PLANILHA (Google Sheets)
+    ========================================================================= */
+
+    /**
+     * Carrega agendamentos existentes da planilha via GET ao Apps Script.
+     * Popula os Sets `agendamentos` e `diasSolicitados`, depois renderiza o calendário.
+     * Garante que o calendário só seja exibido após os dados chegarem (ou falharem).
+     */
+    async function carregarAgendamentosDaPlanilha() {
+      try {
+        const resp = await fetch(`${WEB_APP_URL}?acao=listarAgendamentos`);
+        const data = await resp.json();
+        if (data.ok && Array.isArray(data.agendamentos)) {
+          data.agendamentos.forEach(({ data: d, hora: h, status: s }) => {
+            if (!d || !h) return;
+
+            // Ignora entradas canceladas — não bloqueiam o calendário nem recebem destaque
+            const cancelado = typeof s === 'string' &&
+                              s.trim().toLowerCase().startsWith('cancel');
+            if (cancelado) return;
+
+            agendamentos.add(`${d}|${h}`);
+            diasSolicitados.add(d);
+          });
+        }
+      } catch (err) {
+        console.warn('Não foi possível carregar agendamentos:', err);
+      } finally {
+        gerarCalendario();  // renderiza o calendário independentemente de sucesso ou falha
+      }
+    }
+
+    /* =========================================================================
+       DATAS BASE
+    ========================================================================= */
+
+    /** Data de hoje (com horas zeradas para comparações limpas). */
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+
+    /** Data atualmente exibida no calendário (mês/ano de navegação). */
+    let dataCalendario = new Date(hoje);
+
+    /* =========================================================================
+       CONSTANTES DE NEGÓCIO
+    ========================================================================= */
+
+    /**
+     * Feriados nacionais fixos no formato "MM-DD".
+     * Datas com ano variável (ex.: Páscoa) não estão incluídas.
+     */
+    const feriadosFixos = [
+      '01-01', '04-18', '04-21', '05-01', '08-04', '08-15', '11-04',
+      '09-07', '10-12', '10-28', '11-02', '11-15', '11-20', '12-25'
+    ];
+
+    /* =========================================================================
+       UI: EFEITO DE FOCO PISCANTE (blink-focus)
+    ========================================================================= */
+
+    /**
+     * Remove a classe .blink-focus de todos os elementos que a possuem.
+     * Chamado antes de aplicar o foco a um novo elemento.
+     */
+    function removeAllBlink() {
+      document.querySelectorAll('.blink-focus').forEach(el => el.classList.remove('blink-focus'));
+    }
+
+    /**
+     * Foca um elemento e adiciona o efeito piscante por 12 segundos.
+     * O timer é limpo se o elemento receber foco novamente antes de expirar.
+     * @param {HTMLElement} el - Elemento a ser focado.
+     */
+    function focusAndBlink(el) {
+      if (!el) return;
+      removeAllBlink();
+      try { el.focus({ preventScroll: true }); } catch (_) { el.focus(); }
+      el.classList.add('blink-focus');
+      clearTimeout(el.__blinkTimeout);
+      el.__blinkTimeout = setTimeout(() => { if (el) el.classList.remove('blink-focus'); }, 12000);
+    }
+
+    /**
+     * IIFE: registra listeners globais de focus/blur para manter o efeito
+     * piscante sincronizado com a navegação por teclado (Tab).
+     */
+    (function initGlobalBlinkFocus() {
+      document.querySelectorAll('input, select, textarea, button, a').forEach(el => {
+        el.addEventListener('focus', () => { removeAllBlink(); el.classList.add('blink-focus'); });
+        el.addEventListener('blur',  () => el.classList.remove('blink-focus'));
+      });
+    })();
+
+    /* =========================================================================
+       VALIDAÇÕES DE DATA
+    ========================================================================= */
+
+    /**
+     * Verifica se uma data cai em feriado fixo nacional.
+     * @param  {Date} dt
+     * @returns {boolean}
+     */
+    function isFeriado(dt) {
+      const mm = String(dt.getMonth() + 1).padStart(2, '0');
+      const dd = String(dt.getDate()).padStart(2, '0');
+      return feriadosFixos.includes(`${mm}-${dd}`);
+    }
+
+    /**
+     * Valida se uma data pode ser selecionada para agendamento.
+     * Critérios verificados (em ordem):
+     *   - Não pode ser data passada
+     *   - Não pode ser feriado fixo
+     *   - Não pode ser fim de semana (Dom/Sáb)
+     *   - Deve respeitar a antecedência mínima:
+     *       • Quinta-feira → depende de prazo especial (mínimo até próxima terça)
+     *       • Sexta-feira  → depende de prazo especial (mínimo até próxima quarta)
+     *       • Demais       → mínimo 7 dias úteis a partir de hoje
+     *
+     * @param  {Date} dtSel - Data a ser validada.
+     * @returns {true|"passado"|"feriado"|"nao-agendavel"|"sem-antecedencia"}
+     */
+    function validarDataSelecionada(dtSel) {
+      if (dtSel < hoje)            return 'passado';
+      if (isFeriado(dtSel))        return 'feriado';
+
+      const diaSemana = dtSel.getDay(); // 0=Dom, 1=Seg, ..., 6=Sáb
+      if (diaSemana === 0 || diaSemana === 6) return 'nao-agendavel';
+
+      const antecedenciaMinima = 7;
+
+      // Prazo especial: quinta-feira precisa ter sido solicitada até a terça anterior
+      const dtPrev = new Date(dtSel);
+      dtPrev.setDate(dtSel.getDate() - 1);
+      dtPrev.setHours(0, 0, 0, 0);
+
+      if (diaSemana === 4 && dtPrev < hoje) {
+        const proximaTerca = new Date(hoje);
+        const diasParaTerca = ((2 - proximaTerca.getDay()) + 7) % 7 || 7;
+        proximaTerca.setDate(proximaTerca.getDate() + diasParaTerca);
+        if (dtSel < proximaTerca) return 'sem-antecedencia';
+
+      } else if (diaSemana === 5 && dtPrev < hoje) {
+        // Prazo especial: sexta-feira precisa ter sido solicitada até a quarta anterior
+        const proximaQuarta = new Date(hoje);
+        const diasParaQuarta = ((3 - proximaQuarta.getDay()) + 7) % 7 || 7;
+        proximaQuarta.setDate(proximaQuarta.getDate() + diasParaQuarta);
+        if (dtSel < proximaQuarta) return 'sem-antecedencia';
+
+      } else {
+        // Regra geral: conta 7 dias úteis a partir de hoje
+        let diasUteis = 0;
+        let dataTemp  = new Date(hoje);
+        while (diasUteis < antecedenciaMinima) {
+          dataTemp.setDate(dataTemp.getDate() + 1);
+          const ds = dataTemp.getDay();
+          if (ds !== 0 && ds !== 6 && !isFeriado(dataTemp)) diasUteis++;
+        }
+        if (dtSel < dataTemp) return 'sem-antecedencia';
+      }
+
+      return true;
+    }
+
+    /**
+     * Retorna a mensagem de erro correspondente ao código de validação.
+     * @param  {string} codigo - Código retornado por validarDataSelecionada().
+     * @returns {string}
+     */
+    function obterMensagemErro(codigo) {
+      const mensagens = {
+        'passado'         : 'Selecione datas futuras!',
+        'feriado'         : 'Feriados não são agendáveis.',
+        'nao-agendavel'   : 'Selecione apenas dias úteis.',
+        'sem-antecedencia': 'Necessário no mínimo 14 dias úteis de antecedência.'
+      };
+      return mensagens[codigo] || '';
+    }
+
+    /* =========================================================================
+       CALENDÁRIO: renderização e interação
+    ========================================================================= */
+
+    /**
+     * Verifica se todos os turnos (manhã e tarde) de uma data já foram solicitados.
+     * Uma data está "totalmente ocupada" quando há ao menos um agendamento
+     * antes das 12h (manhã) E ao menos um a partir das 12h (tarde).
+     * @param  {string} dataISO - Data no formato "YYYY-MM-DD".
+     * @returns {boolean}
+     */
+    function dataTotalmenteOcupada(dataISO) {
+      let temManha = false, temTarde = false;
+      for (const chave of agendamentos) {
+        const [dataExist, horaExist] = chave.split('|');
+        if (dataExist === dataISO) {
+          const h = parseInt(horaExist.split(':')[0]);
+          if (h < 12) temManha = true;
+          else        temTarde = true;
+        }
+        if (temManha && temTarde) return true;
+      }
+      return false;
+    }
+
+    /**
+     * Desmarca o dia ativo no calendário, limpa o campo #dataVisita e
+     * redefine o estado interno diaAtivo.
+     */
+    function removerFocoDiaAnterior() {
+      document.querySelectorAll('.dia').forEach(d => d.classList.remove('selected'));
+      diaAtivo = null;
+      $('dataVisita').value = '';
+    }
+
+    /**
+     * Trata o clique em um dia válido e disponível no calendário:
+     *   - Valida a data selecionada
+     *   - Detecta duplo clique (fecha formulário ao clicar no mesmo dia duas vezes)
+     *   - Preenche #dataVisita, repopula os horários e exibe o formulário
+     * @param {number}      dia      - Número do dia do mês.
+     * @param {HTMLElement} elemento - Célula do calendário clicada.
+     */
+    function selecionarDia(dia, elemento) {
+      const dtSel    = new Date(dataCalendario.getFullYear(), dataCalendario.getMonth(), dia);
+      const validacao = validarDataSelecionada(dtSel);
+
+      $('mensagem').textContent = '';
+      $('mensagemConfirmacao').style.display = 'none';
+
+      // Bloqueia datas inválidas
+      if (validacao !== true) {
+        $('mensagem').textContent = obterMensagemErro(validacao);
+        return;
+      }
+
+      // Formato ISO da data selecionada
+      const dataFormatadaCheck =
+        `${dataCalendario.getFullYear()}-` +
+        `${String(dataCalendario.getMonth() + 1).padStart(2, '0')}-` +
+        `${String(dia).padStart(2, '0')}`;
+
+      // Bloqueia data totalmente ocupada
+      if (dataTotalmenteOcupada(dataFormatadaCheck)) {
+        removerFocoDiaAnterior();
+        mostrarFormulario(false);
+        ultimoDiaClicado = null;
+        $('mensagem').style.color = 'red';
+        $('mensagem').textContent = 'Não há horários disponíveis nesta data! Selecione outra data no calendário.';
+        return;
+      }
+
+      // Duplo clique no mesmo dia → fecha o formulário
+      const diaKey = `${dataCalendario.getFullYear()}-${dataCalendario.getMonth()}-${dia}`;
+      if (ultimoDiaClicado === diaKey && diaAtivo === dia) {
+        removerFocoDiaAnterior();
+        mostrarFormulario(false);
+        ultimoDiaClicado = null;
+        return;
+      }
+
+      // Marca o dia como selecionado
+      document.querySelectorAll('.dia').forEach(d => d.classList.remove('selected'));
+      elemento.classList.add('selected');
+      diaAtivo         = dia;
+      ultimoDiaClicado = diaKey;
+
+      // Preenche campo de data e atualiza horários disponíveis
+      const dataFormatada =
+        `${dataCalendario.getFullYear()}-` +
+        `${String(dataCalendario.getMonth() + 1).padStart(2, '0')}-` +
+        `${String(dia).padStart(2, '0')}`;
+
+      $('dataVisita').value = dataFormatada;
+      popularHorarios($('infoFuncionamento').textContent, dataFormatada);
+
+      mostrarFormulario(true);
+
+      // Define o campo a receber foco ao abrir o formulário
+      if (focusHorarioOnNextOpen) {
+        focusAndBlink($('horario'));
+        focusHorarioOnNextOpen = false;
+      } else {
+        focusAndBlink($('tipo'));
+      }
+    }
+
+    /**
+     * Trata o clique em um dia não disponível (fim de semana, sem antecedência, etc.).
+     * Exibe a mensagem de erro correspondente e fecha o formulário.
+     * @param {number} dia - Número do dia do mês.
+     */
+    function clicarDiaNaoPermitido(dia) {
+      const dtSel    = new Date(dataCalendario.getFullYear(), dataCalendario.getMonth(), dia);
+      const validacao = validarDataSelecionada(dtSel);
+      removerFocoDiaAnterior();
+      mostrarFormulario(false);
+      ultimoDiaClicado = null;
+      $('mensagem').textContent = '';
+      $('mensagemConfirmacao').style.display = 'none';
+      if (validacao !== true) $('mensagem').textContent = obterMensagemErro(validacao);
+    }
+
+    /**
+     * Trata o clique em um dia passado: exibe aviso e fecha o formulário.
+     */
+    function clicarDiaPassado() {
+      removerFocoDiaAnterior();
+      mostrarFormulario(false);
+      ultimoDiaClicado = null;
+      $('mensagem').textContent = '';
+      $('mensagemConfirmacao').style.display = 'none';
+      $('mensagem').textContent = 'Selecione datas futuras!';
+    }
+
+    /**
+     * Trata o clique em um feriado: exibe aviso e fecha o formulário.
+     */
+    function clicarFeriado() {
+      removerFocoDiaAnterior();
+      mostrarFormulario(false);
+      ultimoDiaClicado = null;
+      $('mensagem').textContent = '';
+      $('mensagemConfirmacao').style.display = 'none';
+      $('mensagem').textContent = 'Feriados não são agendáveis.';
+    }
+
+    /**
+     * Renderiza o grid do calendário para o mês/ano atual de `dataCalendario`.
+     * Para cada dia, atribui a classe CSS e o listener de clique adequados
+     * conforme: passado, feriado, fim de semana, sem antecedência, lotado ou livre.
+     */
+    function gerarCalendario() {
+      const cal = $('calendar');
+      cal.innerHTML = '';
+
+      // Exibe mensagem orientativa apenas na primeira renderização
+      if (!mensagemInicialExibida) {
+        $('mensagem').textContent = 'Escolha uma data pretendida no calendário e preencha os campos obrigatórios (*) no formulário.';
+        $('mensagem').style.color = 'darkblue';
+        mensagemInicialExibida = true;
+      } else {
+        $('mensagem').style.color = 'red'; // restaura cor de alerta para navegações subsequentes
+      }
+
+      // Cabeçalho com os dias da semana
+      const diasSemana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+      diasSemana.forEach(d => {
+        const header = document.createElement('div');
+        header.textContent = d;
+        header.className   = 'dia';
+        header.style.fontWeight = 'bold';
+        cal.appendChild(header);
+      });
+
+      // Células vazias para alinhar o primeiro dia ao dia correto da semana
+      const primeiroDia = new Date(dataCalendario.getFullYear(), dataCalendario.getMonth(), 1);
+      const ultimoDia   = new Date(dataCalendario.getFullYear(), dataCalendario.getMonth() + 1, 0);
+      const diasVazios  = primeiroDia.getDay();
+
+      for (let i = 0; i < diasVazios; i++) {
+        const vazio = document.createElement('div');
+        vazio.className = 'dia';
+        cal.appendChild(vazio);
+      }
+
+      // Células dos dias do mês
+      for (let dia = 1; dia <= ultimoDia.getDate(); dia++) {
+        const elemento  = document.createElement('div');
+        elemento.textContent = dia;
+        elemento.className   = 'dia';
+
+        const dtDia    = new Date(dataCalendario.getFullYear(), dataCalendario.getMonth(), dia);
+        const validacao = validarDataSelecionada(dtDia);
+
+        // Formata a data para comparações com os Sets de agendamento
+        const dataStr =
+          `${dtDia.getFullYear()}-` +
+          `${String(dtDia.getMonth() + 1).padStart(2, '0')}-` +
+          `${String(dtDia.getDate()).padStart(2, '0')}`;
+
+        const totalmenteOcupada = dataTotalmenteOcupada(dataStr);
+
+        // Atribui classe e listener conforme situação do dia
+        if (dtDia < hoje) {
+          elemento.classList.add('dia-passado-feriado');
+          elemento.addEventListener('click', () => clicarDiaPassado());
+
+        } else if (isFeriado(dtDia)) {
+          elemento.classList.add('dia-passado-feriado');
+          elemento.addEventListener('click', () => clicarFeriado());
+
+        } else if (validacao === 'nao-agendavel') {
+          // Fim de semana ou dia bloqueado
+          elemento.classList.add('nao-agendavel');
+          elemento.addEventListener('click', () => clicarDiaNaoPermitido(dia));
+        
+        } else if (validacao === 'sem-antecedencia') {
+          // Antecedência insuficiente
+          if (totalmenteOcupada) {
+            elemento.classList.add('sem-vagas-tma');
+          } else if (diasSolicitados.has(dataStr)) {
+            elemento.classList.add('sem-antecedencia');
+            elemento.classList.add('agendado-2');
+          } else {
+            elemento.classList.add('sem-antecedencia');
+          }
+          elemento.addEventListener('click', () => clicarDiaNaoPermitido(dia));
+
+        } else if (totalmenteOcupada) {
+          // Dia com manhã e tarde já solicitados (fora do TMA) — sem alteração
+          elemento.classList.add('sem-vagas');
+          elemento.addEventListener('click', () => {
+            removerFocoDiaAnterior();
+            mostrarFormulario(false);
+            ultimoDiaClicado = null;
+            $('mensagem').style.color = 'red';
+            $('mensagem').textContent = 'Não há horários disponíveis nesta data! Selecione outra data no calendário.';
+          });
+
+        } else {
+          // Dia disponível para agendamento
+          elemento.classList.add('clicavel');
+          // Fora do TMA, 1 turno reservado → clicável + contorno amarelo
+          if (diasSolicitados.has(dataStr)) {
+            elemento.classList.add('agendado-2');
+          }
+          elemento.addEventListener('click', () => selecionarDia(dia, elemento));
+        }
+
+        cal.appendChild(elemento);
+      }
+    }
+
+    /**
+     * Atualiza os selects de mês e ano conforme `dataCalendario`.
+     * O intervalo de anos exibido vai do ano corrente até +2 anos.
+     */
+    function atualizarMesAno() {
+      const meses = [
+        'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+        'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+      ];
+      const monthSelect = $('monthSelector');
+      const yearSelect  = $('yearSelector');
+
+      // Popula o select de meses
+      monthSelect.innerHTML = '';
+      meses.forEach((mes, idx) => {
+        const option       = document.createElement('option');
+        option.value       = idx;
+        option.textContent = mes;
+        option.selected    = idx === dataCalendario.getMonth();
+        monthSelect.appendChild(option);
+      });
+
+      // Popula o select de anos (ano atual até +2)
+      yearSelect.innerHTML = '';
+      for (let ano = dataCalendario.getFullYear(); ano <= dataCalendario.getFullYear() + 2; ano++) {
+        const option       = document.createElement('option');
+        option.value       = ano;
+        option.textContent = ano;
+        option.selected    = ano === dataCalendario.getFullYear();
+        yearSelect.appendChild(option);
+      }
+    }
+
+    /**
+     * Navega para o mês anterior ou seguinte e re-renderiza o calendário.
+     * Limpa a seleção ativa e o formulário.
+     * @param {-1|1} direcao - Direção da navegação (-1 = anterior, +1 = próximo).
+     */
+    function navegarMes(direcao) {
+      dataCalendario.setMonth(dataCalendario.getMonth() + direcao);
+      atualizarMesAno();
+      gerarCalendario();
+      diaAtivo = null; ultimoDiaClicado = null;
+      mostrarFormulario(false);
+      $('dataVisita').value = ''; $('mensagem').textContent = '';
+      $('mensagemConfirmacao').style.display = 'none';
+    }
+
+    /**
+     * Navega para o ano anterior ou seguinte e re-renderiza o calendário.
+     * @param {-1|1} direcao - Direção da navegação (-1 = anterior, +1 = próximo).
+     */
+    function navegarAno(direcao) {
+      dataCalendario.setFullYear(dataCalendario.getFullYear() + direcao);
+      atualizarMesAno();
+      gerarCalendario();
+      diaAtivo = null; ultimoDiaClicado = null;
+      mostrarFormulario(false);
+      $('dataVisita').value = ''; $('mensagem').textContent = '';
+      $('mensagemConfirmacao').style.display = 'none';
+    }
+
+    /* =========================================================================
+       FORMULÁRIO: horários, máscaras de entrada, regras por tipo de visitante
+    ========================================================================= */
+
+    /**
+     * Popula o select #horario com os horários disponíveis para a data selecionada.
+     * Os intervalos de manhã e tarde são extraídos do texto de funcionamento do museu.
+     * Horários cujo turno já esteja reservado para a data são desabilitados.
+     *
+     * @param {string} horarioTexto    - Texto bruto do horário de funcionamento.
+     * @param {string} [dataReferencia] - Data ISO ("YYYY-MM-DD") para filtrar turnos ocupados.
+     */
+    function popularHorarios(horarioTexto = '', dataReferencia = '') {
+      const select = $('horario');
+      select.innerHTML = '<option value="">Selecione...</option>';
+
+      // Normaliza o texto: remove acentos, pontuação e espaços redundantes
+      const s = (horarioTexto || '')
+        .replace(/\u00A0/g, ' ')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[.,;]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      // Extrai intervalos de hora no formato "Xh às Yh" ou "X:MM às Y:MM"
+      const re      = /(\d{1,2})(?::(\d{2}))?\s*(?:h|horas)?\s*(?:as|às|a|ate|até)\s*(\d{1,2})(?::(\d{2}))?/gi;
+      const matches = [...s.matchAll(re)];
+
+      let inicioManha, fimManha, inicioTarde, fimTarde;
+
+      if (matches.length >= 2) {
+        // Dois intervalos detectados → primeiro = manhã, segundo = tarde
+        inicioManha = parseInt(matches[0][1]); fimManha = parseInt(matches[0][3]) - 1;
+        inicioTarde = parseInt(matches[1][1]); fimTarde  = parseInt(matches[1][3]) - 1;
+      } else if (matches.length === 1) {
+        // Um único intervalo → split ao meio (manhã até 11h, tarde a partir de 13h)
+        const unicaInicio = parseInt(matches[0][1]);
+        const unicaFim    = parseInt(matches[0][3]);
+        inicioManha = unicaInicio; fimManha = Math.min(unicaFim - 1, 11);
+        inicioTarde = 13;          fimTarde  = unicaFim - 1;
+      } else {
+        // Nenhum intervalo detectado → fallback padrão
+        inicioManha = 8; fimManha = 11; inicioTarde = 13; fimTarde = 18;
+      }
+
+      // Verifica quais turnos já possuem reserva para a data de referência
+      let manchaTurnoManha = false;
+      let manchaTurnoTarde = false;
+
+      if (dataReferencia) {
+        for (const chave of agendamentos) {
+          const [dataExist, horaExist] = chave.split('|');
+          if (dataExist === dataReferencia) {
+            const h = parseInt(horaExist.split(':')[0]);
+            if (h < 12) manchaTurnoManha = true;
+            else        manchaTurnoTarde = true;
+          }
+        }
+      }
+
+      /**
+       * Adiciona opções de horário ao select em intervalos de 30 minutos.
+       * Opções do turno já reservado são inseridas desabilitadas.
+       * @param {number}  inicio       - Hora de início (0–23).
+       * @param {number}  fim          - Hora de término (0–23).
+       * @param {boolean} turnoOcupado - Se true, opções são desabilitadas.
+       */
+      const adicionarIntervalo = (inicio, fim, turnoOcupado) => {
+        for (let h = inicio; h <= fim; h++) {
+          for (let m = 0; m < 60; m += 30) {
+            if (h === fim && m > 0) continue; // não adiciona meia-hora na última hora
+            const hora   = String(h).padStart(2, '0');
+            const minuto = String(m).padStart(2, '0');
+            const opt    = document.createElement('option');
+            opt.value       = `${hora}:${minuto}`;
+            opt.textContent = `${hora}:${minuto}`;
+            if (turnoOcupado) opt.disabled = true;
+            select.appendChild(opt);
+          }
+        }
+      };
+
+      adicionarIntervalo(inicioManha, fimManha, manchaTurnoManha);
+      adicionarIntervalo(inicioTarde, fimTarde, manchaTurnoTarde);
+    }
+
+    /**
+     * Exibe ou oculta o container do formulário de agendamento.
+     * @param {boolean} mostrar
+     */
+    function mostrarFormulario(mostrar) {
+      $('formContainer').style.display = mostrar ? 'block' : 'none';
+    }
+
+    /**
+     * Atualiza o estado dos campos do formulário conforme o Tipo de Visitante selecionado.
+     *   - "P.Física": desabilita campos institucionais, preenche valores padrão.
+     *   - "Institucional" / "Outros": habilita todos os campos e limpa valores.
+     */
+    function atualizarTipo() {
+      const tipoVal = $('tipo').value;
+      const isPF    = tipoVal === 'P.Física';
+
+      const camposInstitucionais = [
+        'cep', 'endereco', 'numero', 'bairro',
+        'nomeCompleto', 'ocupacao', 'telefone', 'numeroResponsaveis'
+      ];
+
+      camposInstitucionais.forEach(id => $(id).disabled = isPF);
+      ['cidade', 'uf'].forEach(id => $(id).disabled = false);
+
+      if (isPF) {
+        // Pessoa Física: preenche campos com valores padrão e trava institucionais
+        $('email').disabled   = false;
+        $('email').required   = true;
+        $('nomeCompleto').value       = $('nome').value;
+        $('numeroResponsaveis').value = 1;
+        $('tipoPublico').value        = 'Familiar';
+        $('tipoInstituicao').value    = 'Outros';
+        $('tipoInstituicao').disabled = true;
+
+        camposInstitucionais.forEach(id => {
+          if ($(id).tagName === 'SELECT') $(id).value = '';
+          else if (id !== 'numeroResponsaveis') $(id).value = '-';
+        });
+        $('cidade').value = '';
+        $('uf').value     = '';
+
+      } else {
+        // Institucional / Outros: limpa e habilita todos os campos
+        $('email').disabled = false;
+        $('email').required = true;
+        ['cep', 'endereco', 'numero', 'bairro', 'nomeCompleto',
+         'ocupacao', 'telefone', 'numeroResponsaveis', 'cidade', 'uf', 'nome'].forEach(id => {
+          if ($(id) && $(id).tagName !== 'SELECT') $(id).value = '';
+        });
+        $('numeroResponsaveis').value = 1;
+        $('tipoPublico').value        = '';
+      }
+
+      // Move o foco para o primeiro campo editável após a seleção
+      if (tipoVal) $('nome').focus();
+    }
+
+    /**
+     * Atualiza o campo País com base na UF informada.
+     * Se a UF for um estado brasileiro, define "BR" e trava o campo.
+     * Caso contrário, libera o campo para edição manual.
+     */
+    function updatePaisByUF() {
+      const ufVal  = ($('uf').value || '').toUpperCase().trim();
+      const paisEl = $('pais');
+      const ufsBR  = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG',
+                       'PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
+
+      if (ufsBR.includes(ufVal)) {
+        paisEl.value    = 'BR';
+        paisEl.disabled = true;
+        paisEl.setAttribute('tabindex', '-1');
+      } else {
+        paisEl.disabled = false;
+        paisEl.value    = '';
+        paisEl.removeAttribute('tabindex');
+      }
+    }
+
+    /* =========================================================================
+       LISTENERS: MÁSCARAS E COMPORTAMENTOS DE CAMPOS
+    ========================================================================= */
+
+    // UF: permite apenas letras (A–Z) e converte para maiúsculas
+    $('uf').addEventListener('input', function () {
+      this.value = (this.value || '').replace(/[^a-zA-Z]/g, '').toUpperCase().slice(0, 2);
+    });
+    $('uf').addEventListener('input', updatePaisByUF);
+    updatePaisByUF(); // inicializa o estado do campo País
+
+    // Tipo de Visitante: atualiza campos obrigatórios ao mudar a seleção
+    $('tipo').addEventListener('change', atualizarTipo);
+
+    // Pessoa Física: sincroniza #nomeCompleto com #nome em tempo real
+    $('nome').addEventListener('input', () => {
+      if ($('tipo').value === 'P.Física') $('nomeCompleto').value = $('nome').value;
+    });
+
+    // Telefone: aplica máscara "(XX) XXXXX-XXXX"
+    $('telefone').addEventListener('input', function () {
+      this.value = this.value.replace(/\D/g, '').slice(0, 11)
+                             .replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
+    });
+
+    // CEP: aplica máscara "XXXXX-XXX" enquanto o usuário digita
+    $('cep').addEventListener('input', () => {
+      $('cep').value = $('cep').value.replace(/\D/g, '').slice(0, 8)
+                                     .replace(/(\d{5})(\d)/, '$1-$2');
+    });
+
+    // CEP: ao sair do campo, busca endereço via API ViaCEP (apenas para não-PF)
+    $('cep').addEventListener('blur', () => {
+      $('mensagem').textContent = '';
+      const v = $('cep').value;
+      if (!/^\d{5}-\d{3}$/.test(v) || $('tipo').value === 'P.Física') return;
+
+      fetch(`https://viacep.com.br/ws/${v.replace('-', '')}/json/`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.erro) { $('mensagem').textContent = 'CEP não encontrado!'; return; }
+          $('endereco').value = data.logradouro;
+          $('bairro').value   = data.bairro;
+          $('cidade').value   = data.localidade;
+          $('uf').value       = data.uf;
+          updatePaisByUF();
+          $('numero').focus();
+        })
+        .catch(() => { $('mensagem').textContent = 'Erro ao buscar CEP.'; });
+    });
+
+    /* =========================================================================
+       LISTENERS: NAVEGAÇÃO DO CALENDÁRIO
+    ========================================================================= */
+
+    $('monthPrev').addEventListener('click', () => navegarMes(-1));
+    $('monthNext').addEventListener('click', () => navegarMes(+1));
+    $('yearPrev').addEventListener('click',  () => navegarAno(-1));
+    $('yearNext').addEventListener('click',  () => navegarAno(+1));
+
+    // Troca de mês pelo select dropdown
+    $('monthSelector').addEventListener('change', (e) => {
+      dataCalendario.setMonth(parseInt(e.target.value));
+      gerarCalendario();
+      diaAtivo = null; ultimoDiaClicado = null;
+      mostrarFormulario(false);
+      $('dataVisita').value = ''; $('mensagem').textContent = '';
+      $('mensagemConfirmacao').style.display = 'none';
+    });
+
+    // Troca de ano pelo select dropdown
+    $('yearSelector').addEventListener('change', (e) => {
+      dataCalendario.setFullYear(parseInt(e.target.value));
+      gerarCalendario();
+      diaAtivo = null; ultimoDiaClicado = null;
+      mostrarFormulario(false);
+      $('dataVisita').value = ''; $('mensagem').textContent = '';
+      $('mensagemConfirmacao').style.display = 'none';
+    });
+
+    /* =========================================================================
+       LISTENERS: FORMULÁRIO — SUBMIT E BOTÕES
+    ========================================================================= */
+
+    // Impede que a tecla Enter dispare o submit (exceto em botões)
+    $('bookingForm').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') {
+        e.preventDefault();
+      }
+    });
+
+    /**
+     * Handler de submit do formulário.
+     * Se o campo "Observações" estiver vazio, solicita confirmação ao usuário antes de enviar.
+     * Caso contrário, chama processarEnvioFormulario() diretamente.
+     */
+    $('bookingForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      $('mensagem').textContent = '';
+      $('mensagem').style.color = 'red';
+
+      const observacoesEl    = $('observacoes');
+      const observacoesValue = (observacoesEl.value || '').trim();
+
+      if (!observacoesValue) {
+        // Cria (ou reutiliza) a caixa de confirmação de observações
+        let msgObsConfirm = document.getElementById('mensagemObservacoesConfirm');
+        if (!msgObsConfirm) {
+          msgObsConfirm = document.createElement('div');
+          msgObsConfirm.id        = 'mensagemObservacoesConfirm';
+          msgObsConfirm.className = 'mensagem-confirmacao';
+          msgObsConfirm.style.cssText =
+            'display:flex;justify-content:center;align-items:center;gap:10px;' +
+            'font-size:14px;color:red;font-weight:bold;flex-wrap:wrap;';
+          msgObsConfirm.innerHTML = `
+            <span>Deseja colocar alguma observação no campo observações?</span>
+            <button class="btn-sim" type="button"
+              style="padding:6px 12px;font-size:14px;cursor:pointer;border:none;border-radius:4px;background-color:#28a745;color:white;">Sim</button>
+            <button class="btn-nao" type="button"
+              style="padding:6px 12px;font-size:14px;cursor:pointer;border:none;border-radius:4px;background-color:#dc3545;color:white;">Não</button>
+          `;
+
+          // Insere a caixa logo após o grid do calendário
+          document.getElementById('calendar').after(msgObsConfirm);
+
+          // "Sim" → foca o campo de observações para o usuário preencher
+          msgObsConfirm.querySelector('.btn-sim').addEventListener('click', () => {
+            msgObsConfirm.remove();
+            focusAndBlink(observacoesEl);
+            observacoesEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          });
+
+          // "Não" → prossegue com o envio sem observação
+          msgObsConfirm.querySelector('.btn-nao').addEventListener('click', () => {
+            msgObsConfirm.remove();
+            processarEnvioFormulario();
+          });
+        }
+
+        msgObsConfirm.style.display = 'flex';
+        const btnSim = msgObsConfirm.querySelector('.btn-sim');
+        if (btnSim) focusAndBlink(btnSim);
+        return;
+      }
+
+      // Campo de observações preenchido → envia diretamente
+      processarEnvioFormulario();
+    });
+
+    /**
+     * Processa o envio do formulário após as confirmações de UX:
+     *   1. Valida o e-mail (formato estrito)
+     *   2. Verifica se data e horário foram selecionados
+     *   3. Checa duplicidade exata (data + hora) e por turno (manhã/tarde)
+     *   4. Envia payload ao Apps Script
+     *   5. Em caso de sucesso, exibe caixa de confirmação "Deseja agendar outra visita?"
+     */
+    async function processarEnvioFormulario() {
+      $('mensagem').textContent = '';
+      $('mensagem').style.color = 'red';
+
+      // --- Validação de e-mail ---
+      const emailEl    = $('email');
+      if (emailEl) {
+        const emailValue = sanitizeEmail(emailEl.value);
+        emailEl.value = emailValue; // salva o valor sanitizado de volta no campo
+
+        if (!emailValue || !isValidEmailStrict(emailValue)) {
+          emailEl.classList.add('invalid');
+          $('mensagem').textContent = 'E-mail inválido! Por favor, corrija este campo.';
+          focusAndBlink(emailEl);
+          emailEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return;
+        }
+        emailEl.classList.remove('invalid');
+      }
+
+      // --- Helpers locais para cálculos de data/hora ---
+
+      /**
+       * Converte string "HH:MM" em objeto { h, m }.
+       * @param  {string} hhmm
+       * @returns {{ h: number, m: number }}
+       */
+      const parseHora = (hhmm) => {
+        if (!hhmm || !/^\d{2}:\d{2}$/.test(hhmm)) return { h: NaN, m: NaN };
+        const [hStr, mStr] = hhmm.split(':');
+        return { h: Number(hStr), m: Number(mStr) };
+      };
+
+      /**
+       * Retorna o turno de um horário: 'MANHA' (< 12h), 'TARDE' (12–17h) ou 'INV' (inválido).
+       * @param  {string} hhmm
+       * @returns {'MANHA'|'TARDE'|'NOITE'|'INV'}
+       */
+      const turnoDe = (hhmm) => {
+        const { h } = parseHora(hhmm);
+        if (isNaN(h))  return 'INV';
+        if (h < 12)    return 'MANHA';
+        if (h < 18)    return 'TARDE';
+        return 'NOITE';
+      };
+
+      /**
+       * Converte string ISO "YYYY-MM-DD" para "DD/MM/YYYY".
+       * @param  {string} iso
+       * @returns {string}
+       */
+      const formatBR = (iso) => {
+        const [Y, M, D] = iso.split('-');
+        return `${D}/${M}/${Y}`;
+      };
+
+      /**
+       * Percorre datas a partir de `dataISO` e retorna a próxima data válida para agendamento.
+       * @param  {string} dataISO     - Data base no formato "YYYY-MM-DD".
+       * @param  {number} limiteDias  - Limite de dias a pesquisar (padrão: 90).
+       * @returns {string|null}       - Data no formato "YYYY-MM-DD" ou null se não encontrar.
+       */
+      const sugerirProximaData = (dataISO, limiteDias = 90) => {
+        const base = new Date(dataISO + 'T00:00:00');
+        for (let i = 1; i <= limiteDias; i++) {
+          const cand = new Date(base);
+          cand.setDate(base.getDate() + i);
+          if (cand < hoje)            continue;
+          if (isFeriado(cand))        continue;
+          const v = validarDataSelecionada(cand);
+          if (v === 'nao-agendavel' || v === 'sem-antecedencia') continue;
+
+          const yyyy = cand.getFullYear();
+          const mm   = String(cand.getMonth() + 1).padStart(2, '0');
+          const dd   = String(cand.getDate()).padStart(2, '0');
+          return `${yyyy}-${mm}-${dd}`;
+        }
+        return null;
+      };
+
+      // --- Coleta data e horário selecionados ---
+      const dataSel = $('dataVisita').value; // "YYYY-MM-DD"
+      const horaSel = $('horario').value;    // "HH:MM"
+
+      if (!dataSel || !horaSel) {
+        $('mensagem').textContent = 'Selecione a Data da Visita e o Horário.';
+        if (!dataSel) focusAndBlink($('dataVisita')); else focusAndBlink($('horario'));
+        return;
+      }
+
+      // --- Checa duplicidade exata (mesma data E mesmo horário) ---
+      const chave = `${dataSel}|${horaSel}`;
+      if (agendamentos.has(chave)) {
+        $('mensagem').textContent = 'Já existe um agendamento para esta data e este horário. Escolha outro horário.';
+        focusAndBlink($('horario'));
+        return;
+      }
+
+      // --- Checa se manhã e tarde já estão ambos solicitados nesta data ---
+      let temManha = false, temTarde = false;
+      for (const chaveExist of agendamentos) {
+        const [dataExist, horaExist] = chaveExist.split('|');
+        if (dataExist === dataSel) {
+          const t = turnoDe(horaExist);
+          if (t === 'MANHA') temManha = true;
+          if (t === 'TARDE') temTarde = true;
+        }
+      }
+
+      if (temManha && temTarde) {
+        const sugerida = sugerirProximaData(dataSel);
+        if (sugerida) {
+          $('mensagem').innerHTML =
+            `Já existem solicitações para <strong>manhã</strong> e <strong>tarde</strong> nesta data. ` +
+            `Sugerimos <strong>${formatBR(sugerida)}</strong> ou outra data disponível.`;
+
+          // Navega o calendário para o mês da data sugerida
+          const dtSug = new Date(sugerida + 'T00:00:00');
+          if (dtSug.getFullYear() !== dataCalendario.getFullYear() ||
+              dtSug.getMonth()    !== dataCalendario.getMonth()) {
+            dataCalendario = new Date(dtSug);
+            atualizarMesAno();
+          }
+          gerarCalendario();
+          const diaClicavel = document.querySelector('.dia.clicavel');
+          if (diaClicavel) focusAndBlink(diaClicavel);
+        } else {
+          $('mensagem').textContent =
+            'Já existem solicitações nesta data para manhã e tarde. Selecione outra data disponível.';
+        }
+        return;
+      }
+
+      // --- Checa duplicidade por turno (mesmo turno já reservado nesta data) ---
+      const turnoNovo = turnoDe(horaSel);
+      if (turnoNovo === 'INV') {
+        $('mensagem').textContent = 'Horário inválido. Informe no formato HH:MM.';
+        focusAndBlink($('horario'));
+        return;
+      }
+
+      let existeMesmoTurno = false;
+      for (const chaveExist of agendamentos) {
+        const [dataExist, horaExist] = chaveExist.split('|');
+        if (dataExist === dataSel && turnoDe(horaExist) === turnoNovo) {
+          existeMesmoTurno = true;
+          break;
+        }
+      }
+
+      if (existeMesmoTurno) {
+        const labelTurno = turnoNovo === 'MANHA' ? 'manhã'
+                         : turnoNovo === 'TARDE' ? 'tarde' : 'noite';
+        $('mensagem').textContent =
+          `Já existe um agendamento nessa data no mesmo turno (${labelTurno}). Selecione um horário em outro turno.`;
+        focusAndBlink($('horario'));
+        return;
+      }
+
+      // --- Envio ao Apps Script ---
+      try {
+        $('formContainer').style.display = 'none'; // oculta form durante o envio
+        $('mensagem').style.color   = 'black';
+        $('mensagem').textContent   = 'Enviando sua solicitação...';
+
+        const payload = collectFormData();
+        const result  = await enviarParaPlanilhaEEEmail(payload);
+
+        // Trata rejeição explícita do servidor
+        if (!result.ok) {
+          $('mensagem').style.color       = 'red';
+          $('formContainer').style.display = 'block';
+
+          if (result.error === 'EMAIL_INVALIDO') {
+            $('mensagem').textContent = result.message || 'E-mail inválido! Por favor, corrija este campo.';
+            focusAndBlink($('email'));
+            $('email').scrollIntoView({ behavior: 'smooth', block: 'center' });
+          } else {
+            $('mensagem').textContent = result.message || 'Erro ao processar solicitação.';
+            focusAndBlink($('btnEnviar'));
+          }
+          return;
+        }
+
+        // Envio bem-sucedido: limpa mensagem de status
+        $('mensagem').textContent = '';
+        $('mensagem').style.color = 'red';
+
+      } catch (err) {
+        console.error(err);
+        $('mensagem').style.color       = 'red';
+        $('mensagem').textContent       = 'Não foi possível enviar sua solicitação. Verifique a conexão e tente novamente.';
+        $('formContainer').style.display = 'block';
+        focusAndBlink($('btnEnviar'));
+        return;
+      }
+
+      // --- Registra localmente e exibe confirmação pós-envio ---
+      agendamentos.add(chave);
+      ultimoAgendamento = { data: dataSel, hora: horaSel };
+
+      $('mensagemConfirmacao').style.display = 'flex';
+      document.querySelectorAll('.mensagem-confirmacao button')
+              .forEach(btn => btn.style.display = 'inline-block');
+      $('textoConfirmacao').textContent = 'Solicitação enviada! Deseja agendar uma nova visita?';
+
+      const btnSim = document.querySelector('.mensagem-confirmacao .btn-sim');
+      if (btnSim) focusAndBlink(btnSim);
+    }
+
+    // Limpar: reseta o formulário mantendo a data de agendamento atual
+    $('btnLimpar').addEventListener('click', () => {
+      const dataAgendamentoAtual = $('dataAgendamento').value;
+      $('bookingForm').reset();
+      $('dataAgendamento').value        = dataAgendamentoAtual;
+      $('qtdDef').value                 = 0;
+      $('necessidades').value           = '';
+      $('necessidades').disabled        = true;
+      $('necessidadesOutros').style.display = 'none';
+      $('necessidadesOutros').value     = '';
+      $('mensagem').textContent         = '';
+      $('mensagemConfirmacao').style.display = 'none';
+      atualizarTipo();
+      updatePaisByUF();
+    });
+
+    // Cancelar: limpa o formulário E fecha o painel (equivale a Limpar + fechar)
+    $('btnCancelar').addEventListener('click', () => {
+      $('btnLimpar').click();
+      mostrarFormulario(false);
+      document.querySelectorAll('.dia').forEach(d => d.classList.remove('selected'));
+      diaAtivo = null; ultimoDiaClicado = null;
+      $('dataVisita').value = '';
+    });
+
+    /* =========================================================================
+       AÇÕES PÓS-SUBMIT: "Sim" e "Não" da caixa de confirmação
+    ========================================================================= */
+
+    /**
+     * Ação do botão "Sim" na caixa de confirmação pós-envio.
+     * Marca a data do último agendamento em amarelo no calendário,
+     * reseta a seleção e prepara o formulário para um novo agendamento.
+     * O foco é direcionado para o campo #horario na próxima abertura do form.
+     */
+    function agendarOutraVisita() {
+      // Oculta os botões Sim/Não e exibe orientação
+      document.querySelectorAll('.mensagem-confirmacao button').forEach(btn => btn.style.display = 'none');
+      $('textoConfirmacao').textContent = 'Selecione nova data e horário ou mesma data e horário diferente para agendamento.';
+
+      // Marca a data do último agendamento como "solicitada" (amarelo) no calendário
+      if (ultimoAgendamento && ultimoAgendamento.data) {
+        diasSolicitados.add(ultimoAgendamento.data);
+
+        const dt = new Date(ultimoAgendamento.data + 'T00:00:00');
+        if (dt.getFullYear() !== dataCalendario.getFullYear() ||
+            dt.getMonth()    !== dataCalendario.getMonth()) {
+          dataCalendario = new Date(dt);
+          atualizarMesAno();
+        }
+        gerarCalendario();
+      }
+
+      // Reseta a seleção de data/horário e fecha o formulário
+      $('dataVisita').value = '';
+      $('horario').value    = '';
+      document.querySelectorAll('.dia').forEach(d => d.classList.remove('selected'));
+      diaAtivo         = null;
+      ultimoDiaClicado = null;
+      mostrarFormulario(false);
+
+      // Na próxima abertura do formulário, foca diretamente no campo #horario
+      focusHorarioOnNextOpen = true;
+
+      // Guia o usuário destacando o primeiro dia clicável no calendário
+      const primeiroDia = document.querySelector('.dia.clicavel');
+      if (primeiroDia) focusAndBlink(primeiroDia);
+    }
+
+    /**
+     * Ação do botão "Não" na caixa de confirmação pós-envio.
+     * Exibe mensagem de agradecimento, marca a data em amarelo e fecha o formulário.
+     * O usuário não será direcionado para novo agendamento.
+     */
+    function naoAgendarOutra() {
+      $('textoConfirmacao').textContent =
+        'Obrigado por escolher o nosso Museu! Em breve confirmaremos seu agendamento via e-mail.';
+
+      // Oculta os botões Sim/Não
+      document.querySelectorAll('.mensagem-confirmacao button').forEach(btn => btn.style.display = 'none');
+
+      // Marca a data do último agendamento como "solicitada" (amarelo) no calendário
+      if (ultimoAgendamento && ultimoAgendamento.data) {
+        diasSolicitados.add(ultimoAgendamento.data);
+
+        const dt = new Date(ultimoAgendamento.data + 'T00:00:00');
+        if (dt.getFullYear() !== dataCalendario.getFullYear() ||
+            dt.getMonth()    !== dataCalendario.getMonth()) {
+          dataCalendario = new Date(dt);
+          atualizarMesAno();
+        }
+        gerarCalendario(); // re-renderiza para aplicar .agendado-2 (amarelo)
+      }
+
+      // Fecha o formulário — usuário não deseja novo agendamento
+      mostrarFormulario(false);
+    }
+
+    /* =========================================================================
+       LISTENERS: PcD (Pessoas com Deficiência)
+    ========================================================================= */
+
+    // Exibe o campo de texto "Outros" quando necessário
+    $('necessidades').addEventListener('change', function () {
+      if (this.value === 'Outros') {
+        $('necessidadesOutros').style.display   = 'block';
+        $('necessidadesOutros').style.marginTop = '65px';
+      } else {
+        $('necessidadesOutros').style.display = 'none';
+        $('necessidadesOutros').value         = '';
+      }
+    });
+
+    // Habilita/desabilita o select de necessidades conforme quantidade de PcD informada
+    $('qtdDef').addEventListener('input', () => {
+      const qtd = parseInt($('qtdDef').value) || 0;
+      if (qtd > 0) {
+        $('necessidades').disabled = false;
+      } else {
+        $('necessidades').disabled = true;
+        $('necessidades').value    = '-';
+        $('necessidadesOutros').style.display = 'none';
+        $('necessidadesOutros').value         = '-';
+      }
+    });
+
+    /* =========================================================================
+       INICIALIZAÇÃO
+    ========================================================================= */
+
+    /**
+     * IIFE: carrega as logos do museu no header com fallback progressivo.
+     * Tenta três URLs diferentes do Google Drive até uma funcionar.
+     */
+    (function carregarLogos() {
+      const fileId  = '1yynwEqc_W_F5Fs4NCRH-WARjqPzJW3i4';
+      const sources = [
+        `https://lh3.googleusercontent.com/d/${fileId}=s800`,
+        `https://drive.google.com/thumbnail?id=${fileId}&sz=w1600`,
+        `https://drive.google.com/uc?export=view&id=${fileId}`
+      ];
+
+      function loadWithFallback(imgId) {
+        const el = document.getElementById(imgId);
+        if (!el) return;
+        let i = 0;
+        function next() {
+          if (i >= sources.length) return;
+          el.onerror = next;
+          el.src     = sources[i++];
+        }
+        next();
+      }
+
+      loadWithFallback('logo-esq');
+      loadWithFallback('logo-dir');
+    })();
+
+    // Renderiza o calendário inicial e popula os selects de mês/ano
+    atualizarMesAno();
+    gerarCalendario();
+
+    /**
+     * IIFE: preenche o campo #dataAgendamento com a data de hoje (fuso horário local).
+     * Evita o uso de toISOString(), que pode retornar o dia anterior em UTC-3.
+     */
+    (function setHoje() {
+      const hoje       = new Date();
+      const hojeLocal  =
+        hoje.getFullYear() + '-' +
+        String(hoje.getMonth() + 1).padStart(2, '0') + '-' +
+        String(hoje.getDate()).padStart(2, '0');
+      $('dataAgendamento').value = hojeLocal;
+    })();
+
+    /**
+     * Ao carregar a página:
+     *   1. Busca o horário de funcionamento no site do museu (via Jina.ai como proxy)
+     *   2. Exibe na faixa #infoFuncionamento
+     *   3. Popula os horários do select com base no texto obtido (ou fallback fixo)
+     */
+    window.addEventListener('DOMContentLoaded', () => {
+      const infoEl   = $('infoFuncionamento');
+      const prefix   = 'Funcionamento do Museu:';
+
+      // Dois endpoints alternativos (http e https) do site do museu via Jina
+      const endpoints = [
+        'https://r.jina.ai/http://mc.icmc.usp.br/',
+        'https://r.jina.ai/https://mc.icmc.usp.br/'
+      ];
+
+      /** Remove acentos e espaços não-quebráveis para comparações normalizadas. */
+      const normaliza = (s) =>
+        (s || '').replace(/\u00A0/g, ' ').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
+      /** Remove espaços extras e corrige dígitos separados por espaço. */
+      const limpaHorario = (txt) =>
+        (txt || '').replace(/\s+/g, ' ').replace(/(\d)\s+(\d)/g, '$1$2').trim();
+
+      /**
+       * Extrai a linha de horário de funcionamento do texto puro da página.
+       * Procura a seção "HORARIO DE FUNCIONAMENTO" e retorna a primeira linha
+       * com dígitos ou palavras-chave de horário nos próximos 8 itens.
+       * @param  {string} textoPuro
+       * @returns {string}
+       */
+      const extraiHorario = (textoPuro) => {
+        const linhas    = (textoPuro || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        let idxTitulo   = -1;
+
+        for (let i = 0; i < linhas.length; i++) {
+          if (normaliza(linhas[i]).toUpperCase().includes('HORARIO DE FUNCIONAMENTO')) {
+            idxTitulo = i;
+            break;
+          }
+        }
+        if (idxTitulo === -1) return '';
+
+        for (let j = idxTitulo + 1; j < Math.min(idxTitulo + 8, linhas.length); j++) {
+          const ln     = linhas[j];
+          const lnNorm = normaliza(ln);
+          if (!lnNorm) continue;
+          if (/\d/.test(lnNorm) ||
+              /(segunda|terca|terça|quarta|quinta|sexta|hora|funciona|aberto)/i.test(ln)) {
+            return ' ' + limpaHorario(ln);
+          }
+        }
+        return '';
+      };
+
+      // Tenta buscar o horário nos endpoints em sequência; usa fallback fixo se ambos falharem
+      (async () => {
+        let horario = '';
+        for (const url of endpoints) {
+          try {
+            const resp = await fetch(url, { mode: 'cors' });
+            if (!resp.ok) continue;
+            const txt = await resp.text();
+            horario   = extraiHorario(txt);
+            if (horario) break;
+          } catch (_) { /* tenta o próximo endpoint */ }
+        }
+
+        if (!horario) horario = ' Segunda à Sexta-Feira, das 08h às 19h.';
+        infoEl.innerHTML = `${prefix}${horario}`;
+        popularHorarios(horario);
+      })();
+    });
+
+    // Carrega agendamentos existentes da planilha (deve ser chamado após as definições acima)
+    carregarAgendamentosDaPlanilha();
+
+  </script>
+</body>
+</html>
